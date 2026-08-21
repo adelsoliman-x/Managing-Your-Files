@@ -1,0 +1,162 @@
+/**
+ * =========================================================================================
+ * CloudVault Workspace - Prisma Database Schema
+ * =========================================================================================
+ * Comprehensive Data Modeling for File Management, User Authentication, Role-Based Access,
+ * Storage Quota Tracking, Verification Codes, Hierarchical Folders, and Security Audit Logs.
+ * Compatible with PostgreSQL and MySQL.
+ */
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+/// User permission roles for Authorization and RBAC enforcement
+enum Role {
+  USER   // Standard end-user with isolated file space
+  ADMIN  // System administrator with global management capabilities
+}
+
+/// Automated categorization for indexed files based on MIME types and extensions
+enum FileCategory {
+  IMAGE     // png, jpg, gif, webp, svg, avif
+  DOCUMENT  // pdf, docx, txt, md, xlsx, pptx
+  AUDIO     // mp3, wav, flac, aac, m4a
+  VIDEO     // mp4, mkv, mov, webm
+  CODE      // ts, js, py, java, sql, prisma, html, css, json
+  ARCHIVE   // zip, rar, tar, gz, 7z
+  OTHER     // Binary, executables, or unrecognized formats
+}
+
+// -----------------------------------------------------------------------------
+// MODELS
+// -----------------------------------------------------------------------------
+
+/**
+ * User Entity
+ * Manages registered users, authentication credentials, active storage quotas, and roles.
+ */
+model User {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  name              String
+  passwordHash      String             // Salted bcrypt hash
+  role              Role               @default(USER)
+  isVerified        Boolean            @default(false)
+  avatarUrl         String?
+  storageQuotaBytes BigInt             @default(1073741824) // 1 GB default quota (1024 * 1024 * 1024 bytes)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  // Relational associations
+  files             File[]
+  folders           Folder[]
+  verificationCodes VerificationCode[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+/**
+ * VerificationCode Entity
+ * Stores short-lived 6-digit one-time passcodes (OTP) dispatched via Gmail SMTP.
+ */
+model VerificationCode {
+  id        String   @id @default(uuid())
+  userId    String
+  code      String   // 6-digit numeric verification OTP
+  expiresAt DateTime // Code expiration timestamp (15 min default TTL)
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relationships & Cascade deletion
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("verification_codes")
+}
+
+/**
+ * Folder Entity
+ * Supports recursive folder hierarchy for structured file organization.
+ */
+model Folder {
+  id        String   @id @default(uuid())
+  name      String
+  userId    String
+  parentId  String?  // Nullable foreign key for root-level vs sub-nested folders
+  color     String?  @default("indigo")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[] @relation("FolderHierarchy")
+  files     File[]
+
+  @@index([userId])
+  @@index([parentId])
+  @@map("folders")
+}
+
+/**
+ * File Entity
+ * Contains physical file storage metadata, classification, soft-delete state, and extracted text.
+ */
+model File {
+  id               String       @id @default(uuid())
+  name             String       // User-friendly display name or renamed label
+  originalName     String       // Original client upload filename
+  mimeType         String       // e.g. "application/pdf", "image/png"
+  sizeBytes        BigInt       // Byte size for quota computation
+  extension        String       // Extension without dot, e.g. "pdf", "tsx"
+  category         FileCategory @default(OTHER)
+  storagePath      String       // Local disk or Object Storage URI
+  extractedContent String?      @db.Text // Full-text indexing snippet for code & text search
+  isTrashed        Boolean      @default(false) // Soft delete indicator (enables Trash Recovery)
+  userId           String
+  folderId         String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  // Relationships
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder           Folder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([folderId])
+  @@index([isTrashed])
+  @@map("files")
+}
+
+/**
+ * AuditLog Entity
+ * Captures security actions, user operations, and admin events for compliance and debugging.
+ */
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  userEmail String?
+  action    String   // e.g. "USER_REGISTER", "FILE_UPLOAD", "FILE_DELETE", "ROLE_UPDATED"
+  resource  String   // Targeted resource name or ID
+  details   String?  // JSON metadata or human-readable explanation
+  ipAddress String?  // Client IP address
+  userAgent String?  // Browser/Client user-agent string
+  createdAt DateTime @default(now())
+
+  // Relationships
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

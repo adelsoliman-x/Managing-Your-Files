@@ -1,0 +1,6 @@
+{
+  "name": "CloudVault File Workspace",
+  "description": "Full-stack enterprise cloud file storage and workspace management system with JWT authentication, OTP verification, multi-format previews, and audit logging.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
